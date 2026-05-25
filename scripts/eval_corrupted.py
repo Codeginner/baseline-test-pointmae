@@ -58,19 +58,27 @@ def corrupt_sparse(pts, severity):
     return kept[idx]
 
 
-def corrupt_line(pts, severity):
-    """Ring-beam dropout — simulasi scattering cuaca."""
-    n_drop = [1, 2, 3, 4, 5][severity - 1]
+def corrupt_line(pts, sev):
+    gamma = [0.05, 0.10, 0.20, 0.30, 0.45][sev-1]
     K = 32
-    r     = np.linalg.norm(pts, axis=1, keepdims=True).clip(1e-6)
-    theta = np.arcsin(np.clip(pts[:, 2:3] / r, -1, 1))
-    bins  = np.linspace(theta.min(), theta.max() + 1e-6, K + 1)
-    ring  = np.clip(np.digitize(theta[:, 0], bins) - 1, 0, K - 1)
-    dropped = np.random.choice(K, size=n_drop, replace=False)
-    keep  = ~np.isin(ring, dropped)
-    kept  = pts[keep] if keep.sum() >= 64 else pts
-    idx   = np.random.choice(len(kept), size=len(pts), replace=True)
-    return kept[idx]
+    
+    # Konversi ke spherical, bin elevation -> ring assignment
+    r = np.linalg.norm(pts, axis=1, keepdims=True).clip(1e-6)
+    theta = np.arcsin(np.clip(pts[:,2:3]/r, -1, 1))
+    bins = np.linspace(theta.min(), theta.max()+1e-6, K+1)
+    ring = np.clip(np.digitize(theta[:,0], bins)-1, 0, K-1)
+    
+    # Setiap ring di-drop secara independen ~ Bernoulli(gamma)
+    drop_mask = np.random.rand(K) < gamma
+    dropped_rings = np.where(drop_mask)[0]
+    
+    # Fallback: kalau semua ring ke-drop, paksa keep minimal 1 ring
+    if len(dropped_rings) == K:
+        dropped_rings = dropped_rings[:-1]
+    
+    keep = ~np.isin(ring, dropped_rings)
+    kept = pts[keep] if keep.sum() >= 64 else pts
+    return kept[np.random.choice(len(kept), len(pts), replace=True)]
 
 
 def corrupt_occlusion(pts, severity):
@@ -87,7 +95,6 @@ def corrupt_occlusion(pts, severity):
             kept = kept[mask]
     idx = np.random.choice(len(kept), size=len(pts), replace=True)
     return kept[idx]
-
 
 CORRUPTION_FNS = {
     'sparse':    corrupt_sparse,
